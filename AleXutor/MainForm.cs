@@ -613,7 +613,7 @@ MsgBox(0, ""Done"", ""Script complete!"")
         {
             return new NumericUpDown
             {
-                Width = 80, Value = val, Minimum = -9999, Maximum = 9999,
+                Width = 80, Minimum = -9999, Maximum = 9999, Value = val,
                 BackColor = Color.FromArgb(30, 30, 45), ForeColor = Color.White,
                 Margin = new Padding(2, 4, 2, 4)
             };
