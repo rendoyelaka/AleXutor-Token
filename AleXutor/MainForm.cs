@@ -18,7 +18,8 @@ namespace AleXutor
 
         // Tab panels
         private Panel mousePanel = null!, keyPanel = null!, winPanel = null!,
-                       filePanel = null!, scriptPanel = null!, procPanel = null!;
+                       filePanel = null!, scriptPanel = null!, procPanel = null!,
+                       spyPanel  = null!;
 
         public MainForm()
         {
@@ -96,6 +97,7 @@ namespace AleXutor
             filePanel   = BuildFileTab();
             procPanel   = BuildProcessTab();
             scriptPanel = BuildScriptTab();
+            spyPanel    = BuildSpyTab();
 
             tabs.TabPages.Add(MakePage("🖱 Mouse",    mousePanel));
             tabs.TabPages.Add(MakePage("⌨ Keyboard",  keyPanel));
@@ -103,6 +105,7 @@ namespace AleXutor
             tabs.TabPages.Add(MakePage("📁 Files",    filePanel));
             tabs.TabPages.Add(MakePage("⚙ Processes", procPanel));
             tabs.TabPages.Add(MakePage("📜 Script",   scriptPanel));
+            tabs.TabPages.Add(MakePage("🔍 Spy",      spyPanel));
 
             Controls.Add(tabs);
             Controls.Add(logPanel);
@@ -567,6 +570,201 @@ MsgBox(0, ""Done"", ""Script complete!"")
             layout.Controls.Add(scriptBox);
             layout.Controls.Add(MakeRow(btnRun, btnStop, btnOpen, btnSave, btnClear));
             layout.Controls.Add(hint);
+
+            p.Controls.Add(layout);
+            return p;
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // SPY TAB
+        // ──────────────────────────────────────────────────────────────────
+        private Panel BuildSpyTab()
+        {
+            var p = new Panel { Padding = new Padding(12) };
+
+            // ── Info fields ──────────────────────────────────────────────
+            Label MakeField(string label, out Label valueLabel)
+            {
+                valueLabel = new Label
+                {
+                    AutoSize  = false,
+                    Width     = 420,
+                    Height    = 22,
+                    ForeColor = Color.FromArgb(120, 220, 120),
+                    Font      = new Font("Consolas", 9.5f),
+                    Text      = "—",
+                    Margin    = new Padding(0, 0, 0, 0)
+                };
+                return MakeLabel(label);
+            }
+
+            Label lTitle, lClass, lCtrlId, lHandle, lMouse, lClient, lWinPos, lPixel;
+            var fTitle  = MakeField("Window Title :", out lTitle);
+            var fClass  = MakeField("Class Name   :", out lClass);
+            var fCtrl   = MakeField("Control ID   :", out lCtrlId);
+            var fHandle = MakeField("Handle (hWnd):", out lHandle);
+            var fMouse  = MakeField("Mouse (screen):", out lMouse);
+            var fClient = MakeField("Mouse (client):", out lClient);
+            var fWinPos = MakeField("Window Rect  :", out lWinPos);
+            var fPixel  = MakeField("Pixel Color  :", out lPixel);
+
+            // Color swatch
+            var swatch = new Panel
+            {
+                Width     = 28,
+                Height    = 18,
+                BackColor = Color.Gray,
+                BorderStyle = BorderStyle.FixedSingle,
+                Margin    = new Padding(4, 4, 0, 0)
+            };
+
+            // ── Drag finder label (the crosshair control) ────────────────
+            var finder = new Label
+            {
+                Text      = "✛",
+                Width     = 48,
+                Height    = 48,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font      = new Font("Segoe UI", 20f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(120, 180, 255),
+                BackColor = Color.FromArgb(30, 40, 60),
+                BorderStyle = BorderStyle.FixedSingle,
+                Cursor    = Cursors.Cross,
+                Margin    = new Padding(4)
+            };
+
+            var finderHint = MakeLabel("← Drag this crosshair onto any window/control");
+            finderHint.ForeColor = Color.FromArgb(140, 140, 160);
+
+            // ── Live-track timer (only while dragging) ───────────────────
+            bool tracking = false;
+            var trackTimer = new System.Windows.Forms.Timer { Interval = 50 };
+
+            Action updateFields = () =>
+            {
+                try
+                {
+                    var r = WinSpyEngine.Capture();
+
+                    lTitle.Text  = string.IsNullOrEmpty(r.WindowTitle) ? "(no title)" : r.WindowTitle;
+                    lClass.Text  = r.ClassName;
+                    lCtrlId.Text = r.ControlID == 0 ? "—" : r.ControlID.ToString();
+                    lHandle.Text = $"0x{r.Handle:X}";
+                    lMouse.Text  = $"X={r.MouseX},  Y={r.MouseY}";
+                    lClient.Text = $"X={r.ClientX},  Y={r.ClientY}";
+                    lWinPos.Text = r.WinPos;
+                    lPixel.Text  = r.PixelColor;
+
+                    // Parse hex color for swatch
+                    try
+                    {
+                        swatch.BackColor = ColorTranslator.FromHtml(r.PixelColor);
+                    }
+                    catch { }
+                }
+                catch { }
+            };
+
+            trackTimer.Tick += (_, _) =>
+            {
+                if (!tracking) return;
+                updateFields();
+            };
+            trackTimer.Start();
+
+            // Mouse down on finder = start tracking
+            finder.MouseDown += (_, _) =>
+            {
+                tracking = true;
+                finder.ForeColor = Color.FromArgb(255, 200, 60);
+                finder.Cursor = Cursors.Cross;
+            };
+
+            // Mouse up anywhere = stop tracking & do final capture
+            finder.MouseUp += (_, _) =>
+            {
+                tracking = false;
+                finder.ForeColor = Color.FromArgb(120, 180, 255);
+                updateFields();
+                Log($"[Spy] {lTitle.Text} | {lClass.Text} | {lMouse.Text} | {lPixel.Text}");
+            };
+
+            // ── Freeze / Copy buttons ────────────────────────────────────
+            var btnFreeze = MakeButton("❄ Freeze", 100, 30);
+            var btnCopyAll = MakeButton("⧉ Copy All", 110, 30);
+
+            bool frozen = false;
+            btnFreeze.Click += (_, _) =>
+            {
+                frozen = !frozen;
+                tracking = false;
+                btnFreeze.Text = frozen ? "▶ Resume" : "❄ Freeze";
+                trackTimer.Enabled = !frozen;
+            };
+
+            btnCopyAll.Click += (_, _) =>
+            {
+                string all =
+                    $"Window Title : {lTitle.Text}\r\n" +
+                    $"Class Name   : {lClass.Text}\r\n" +
+                    $"Control ID   : {lCtrlId.Text}\r\n" +
+                    $"Handle       : {lHandle.Text}\r\n" +
+                    $"Mouse Screen : {lMouse.Text}\r\n" +
+                    $"Mouse Client : {lClient.Text}\r\n" +
+                    $"Window Rect  : {lWinPos.Text}\r\n" +
+                    $"Pixel Color  : {lPixel.Text}";
+                Clipboard.SetText(all);
+                Log("[Spy] Info copied to clipboard.");
+            };
+
+            // ── Layout ───────────────────────────────────────────────────
+            var grid = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                AutoSize    = true,
+                Padding     = new Padding(4),
+                Margin      = new Padding(0, 8, 0, 8)
+            };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            void AddRow(Label lbl, Label val)
+            {
+                lbl.Margin = new Padding(0, 5, 8, 5);
+                val.Margin = new Padding(0, 5, 0, 5);
+                grid.Controls.Add(lbl);
+                grid.Controls.Add(val);
+            }
+
+            AddRow(fTitle,  lTitle);
+            AddRow(fClass,  lClass);
+            AddRow(fCtrl,   lCtrlId);
+            AddRow(fHandle, lHandle);
+            AddRow(fMouse,  lMouse);
+            AddRow(fClient, lClient);
+            AddRow(fWinPos, lWinPos);
+
+            // Pixel row with swatch inline
+            var pixelRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pixelRow.Controls.Add(lPixel);
+            pixelRow.Controls.Add(swatch);
+            fPixel.Margin = new Padding(0, 5, 8, 5);
+            grid.Controls.Add(fPixel);
+            grid.Controls.Add(pixelRow);
+
+            var layout = new FlowLayoutPanel
+            {
+                Dock          = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize      = true,
+                Padding       = new Padding(8),
+                WrapContents  = false
+            };
+
+            layout.Controls.Add(MakeRow(finder, finderHint));
+            layout.Controls.Add(MakeRow(btnFreeze, btnCopyAll));
+            layout.Controls.Add(MakeSep());
+            layout.Controls.Add(grid);
 
             p.Controls.Add(layout);
             return p;

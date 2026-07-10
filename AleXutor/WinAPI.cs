@@ -94,6 +94,13 @@ namespace AleXutor
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT { public int X, Y; }
 
+        // ── Spy helpers ───────────────────────────────────────────────────
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+        [DllImport("user32.dll")]
+        public static extern int GetDlgCtrlID(IntPtr hWnd);
+
         // ── Clipboard ─────────────────────────────────────────────────────
         [DllImport("user32.dll")]
         public static extern bool OpenClipboard(IntPtr hWndNewOwner);
