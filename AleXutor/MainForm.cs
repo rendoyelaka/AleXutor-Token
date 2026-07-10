@@ -578,196 +578,362 @@ MsgBox(0, ""Done"", ""Script complete!"")
         // ──────────────────────────────────────────────────────────────────
         // SPY TAB
         // ──────────────────────────────────────────────────────────────────
+
+        // Captured coordinate slots
+        private int _capPhoneX, _capPhoneY;
+        private int _capPlusX,  _capPlusY;
+        private int _capMsgX,   _capMsgY;
+        private int _capSendX,  _capSendY;
+        private string _capWinTitle = "";
+
+        private FormatEngine   _formatEngine  = new();
+        private ClipboardWatcher? _clipWatcher;
+
         private Panel BuildSpyTab()
         {
             var p = new Panel { Padding = new Padding(12) };
 
-            // ── Info fields ──────────────────────────────────────────────
-            Label MakeField(string label, out Label valueLabel)
+            // ── Spy info fields ──────────────────────────────────────────
+            Label MakeVal() => new Label
             {
-                valueLabel = new Label
-                {
-                    AutoSize  = false,
-                    Width     = 420,
-                    Height    = 22,
-                    ForeColor = Color.FromArgb(120, 220, 120),
-                    Font      = new Font("Consolas", 9.5f),
-                    Text      = "—",
-                    Margin    = new Padding(0, 0, 0, 0)
-                };
-                return MakeLabel(label);
-            }
-
-            Label lTitle, lClass, lCtrlId, lHandle, lMouse, lClient, lWinPos, lPixel;
-            var fTitle  = MakeField("Window Title :", out lTitle);
-            var fClass  = MakeField("Class Name   :", out lClass);
-            var fCtrl   = MakeField("Control ID   :", out lCtrlId);
-            var fHandle = MakeField("Handle (hWnd):", out lHandle);
-            var fMouse  = MakeField("Mouse (screen):", out lMouse);
-            var fClient = MakeField("Mouse (client):", out lClient);
-            var fWinPos = MakeField("Window Rect  :", out lWinPos);
-            var fPixel  = MakeField("Pixel Color  :", out lPixel);
-
-            // Color swatch
-            var swatch = new Panel
-            {
-                Width     = 28,
-                Height    = 18,
-                BackColor = Color.Gray,
-                BorderStyle = BorderStyle.FixedSingle,
-                Margin    = new Padding(4, 4, 0, 0)
+                AutoSize  = false, Width = 380, Height = 22,
+                ForeColor = Color.FromArgb(120, 220, 120),
+                Font      = new Font("Consolas", 9f), Text = "—"
             };
 
-            // ── Drag finder label (the crosshair control) ────────────────
+            var lTitle  = MakeVal(); var lClass = MakeVal();
+            var lHandle = MakeVal(); var lMouse = MakeVal();
+
+            var swatch = new Panel { Width = 24, Height = 18, BackColor = Color.Gray,
+                BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(4,4,0,0) };
+
+            // ── Crosshair finder ─────────────────────────────────────────
             var finder = new Label
             {
-                Text      = "✛",
-                Width     = 48,
-                Height    = 48,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Font      = new Font("Segoe UI", 20f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(120, 180, 255),
-                BackColor = Color.FromArgb(30, 40, 60),
+                Text = "✛", Width = 48, Height = 48,
+                TextAlign   = ContentAlignment.MiddleCenter,
+                Font        = new Font("Segoe UI", 20f, FontStyle.Bold),
+                ForeColor   = Color.FromArgb(120, 180, 255),
+                BackColor   = Color.FromArgb(30, 40, 60),
                 BorderStyle = BorderStyle.FixedSingle,
-                Cursor    = Cursors.Cross,
-                Margin    = new Padding(4)
+                Cursor      = Cursors.Cross, Margin = new Padding(4)
             };
-
-            var finderHint = MakeLabel("← Drag this crosshair onto any window/control");
+            var finderHint = MakeLabel("← Drag onto any control");
             finderHint.ForeColor = Color.FromArgb(140, 140, 160);
 
-            // ── Live-track timer (only while dragging) ───────────────────
             bool tracking = false;
             var trackTimer = new System.Windows.Forms.Timer { Interval = 50 };
-
-            Action updateFields = () =>
-            {
-                try
-                {
-                    var r = WinSpyEngine.Capture();
-
-                    lTitle.Text  = string.IsNullOrEmpty(r.WindowTitle) ? "(no title)" : r.WindowTitle;
-                    lClass.Text  = r.ClassName;
-                    lCtrlId.Text = r.ControlID == 0 ? "—" : r.ControlID.ToString();
-                    lHandle.Text = $"0x{r.Handle:X}";
-                    lMouse.Text  = $"X={r.MouseX},  Y={r.MouseY}";
-                    lClient.Text = $"X={r.ClientX},  Y={r.ClientY}";
-                    lWinPos.Text = r.WinPos;
-                    lPixel.Text  = r.PixelColor;
-
-                    // Parse hex color for swatch
-                    try
-                    {
-                        swatch.BackColor = ColorTranslator.FromHtml(r.PixelColor);
-                    }
-                    catch { }
-                }
-                catch { }
-            };
+            WinSpyEngine.SpyResult? lastResult = null;
 
             trackTimer.Tick += (_, _) =>
             {
                 if (!tracking) return;
-                updateFields();
+                try
+                {
+                    var r = WinSpyEngine.Capture();
+                    lastResult = r;
+                    lTitle.Text  = string.IsNullOrEmpty(r.WindowTitle) ? "(no title)" : r.WindowTitle;
+                    lClass.Text  = r.ClassName;
+                    lHandle.Text = $"0x{r.Handle:X}";
+                    lMouse.Text  = $"X={r.MouseX},  Y={r.MouseY}";
+                    try { swatch.BackColor = ColorTranslator.FromHtml(r.PixelColor); } catch { }
+                }
+                catch { }
             };
             trackTimer.Start();
 
-            // Mouse down on finder = start tracking
             finder.MouseDown += (_, _) =>
             {
                 tracking = true;
                 finder.ForeColor = Color.FromArgb(255, 200, 60);
-                finder.Cursor = Cursors.Cross;
             };
-
-            // Mouse up anywhere = stop tracking & do final capture
             finder.MouseUp += (_, _) =>
             {
                 tracking = false;
                 finder.ForeColor = Color.FromArgb(120, 180, 255);
-                updateFields();
-                Log($"[Spy] {lTitle.Text} | {lClass.Text} | {lMouse.Text} | {lPixel.Text}");
             };
 
-            // ── Freeze / Copy buttons ────────────────────────────────────
-            var btnFreeze = MakeButton("❄ Freeze", 100, 30);
-            var btnCopyAll = MakeButton("⧉ Copy All", 110, 30);
-
-            bool frozen = false;
-            btnFreeze.Click += (_, _) =>
+            // ── 4 Coordinate capture slots ───────────────────────────────
+            Label MakeSlotLabel(string name, string coord) => new Label
             {
-                frozen = !frozen;
-                tracking = false;
-                btnFreeze.Text = frozen ? "▶ Resume" : "❄ Freeze";
-                trackTimer.Enabled = !frozen;
+                Text      = $"{name}: {coord}",
+                AutoSize  = false, Width = 320, Height = 24,
+                ForeColor = coord == "Not Set" ? Color.FromArgb(180,80,80) : Color.FromArgb(80,220,120),
+                Font      = new Font("Consolas", 9f),
+                Margin    = new Padding(4, 2, 4, 2)
             };
 
-            btnCopyAll.Click += (_, _) =>
+            var slotPhone = MakeSlotLabel("📞 Phone Field", "Not Set");
+            var slotPlus  = MakeSlotLabel("➕ Plus Button", "Not Set");
+            var slotMsg   = MakeSlotLabel("💬 Msg Field  ", "Not Set");
+            var slotSend  = MakeSlotLabel("📤 Send Button", "Not Set");
+
+            Button MakeCaptureBtn(string label) =>
+                MakeButton($"📍 Capture {label}", 160, 28);
+
+            var btnCapPhone = MakeCaptureBtn("Phone Field");
+            var btnCapPlus  = MakeCaptureBtn("Plus Button");
+            var btnCapMsg   = MakeCaptureBtn("Msg Field");
+            var btnCapSend  = MakeCaptureBtn("Send Button");
+
+            void DoCapture(string slot,
+                           Action<int,int,string> save,
+                           Label slotLbl, string slotName)
             {
-                string all =
-                    $"Window Title : {lTitle.Text}\r\n" +
-                    $"Class Name   : {lClass.Text}\r\n" +
-                    $"Control ID   : {lCtrlId.Text}\r\n" +
-                    $"Handle       : {lHandle.Text}\r\n" +
-                    $"Mouse Screen : {lMouse.Text}\r\n" +
-                    $"Mouse Client : {lClient.Text}\r\n" +
-                    $"Window Rect  : {lWinPos.Text}\r\n" +
-                    $"Pixel Color  : {lPixel.Text}";
-                Clipboard.SetText(all);
-                Log("[Spy] Info copied to clipboard.");
+                if (lastResult == null) { Log($"[Spy] Drag crosshair first, then capture."); return; }
+                save(lastResult.MouseX, lastResult.MouseY, lastResult.WindowTitle);
+                slotLbl.Text      = $"{slotName}: X={lastResult.MouseX}, Y={lastResult.MouseY}";
+                slotLbl.ForeColor = Color.FromArgb(80, 220, 120);
+                Log($"[Spy] Captured {slotName} → X={lastResult.MouseX}, Y={lastResult.MouseY}");
+                CheckAllCaptured(btnStartWatcher, statusLbl);
+            }
+
+            // Forward declaration
+            Button btnStartWatcher = MakeButton("▶ Start Clipboard Watcher", 200, 32);
+            Label  statusLbl       = MakeLabel("● Watcher: OFF");
+            statusLbl.ForeColor    = Color.FromArgb(200, 80, 80);
+
+            btnCapPhone.Click += (_, _) => DoCapture("phone",
+                (x, y, t) => { _capPhoneX = x; _capPhoneY = y; _capWinTitle = t; },
+                slotPhone, "📞 Phone Field");
+
+            btnCapPlus.Click += (_, _) => DoCapture("plus",
+                (x, y, _) => { _capPlusX = x; _capPlusY = y; },
+                slotPlus, "➕ Plus Button");
+
+            btnCapMsg.Click += (_, _) => DoCapture("msg",
+                (x, y, _) => { _capMsgX = x; _capMsgY = y; },
+                slotMsg, "💬 Msg Field");
+
+            btnCapSend.Click += (_, _) => DoCapture("send",
+                (x, y, _) => { _capSendX = x; _capSendY = y; },
+                slotSend, "📤 Send Button");
+
+            // ── Format upload section ────────────────────────────────────
+            var sampleBox = new RichTextBox
+            {
+                Height = 80, Width = 540,
+                BackColor   = Color.FromArgb(20, 20, 32),
+                ForeColor   = Color.FromArgb(200, 230, 255),
+                Font        = new Font("Consolas", 9f),
+                BorderStyle = BorderStyle.FixedSingle,
+                ScrollBars  = RichTextBoxScrollBars.Vertical,
+                PlaceholderText = "Paste your sample token here OR upload a file..."
+            };
+
+            var btnUploadSample = MakeButton("📂 Upload Sample Format", 190, 30);
+            var formatStatusLbl = MakeLabel(_formatEngine.Config.IsLearned
+                ? $"✅ Format learned  (Number line:{_formatEngine.Config.NumberLineIndex}, Msg line:{_formatEngine.Config.MessageLineIndex})"
+                : "⚠ No format learned yet");
+            formatStatusLbl.ForeColor = _formatEngine.Config.IsLearned
+                ? Color.FromArgb(80, 220, 120) : Color.FromArgb(220, 180, 60);
+
+            btnUploadSample.Click += (_, _) =>
+            {
+                var dlg = new OpenFileDialog { Filter = "Text Files|*.txt|All Files|*.*" };
+                if (dlg.ShowDialog() != DialogResult.OK) return;
+                sampleBox.Text = System.IO.File.ReadAllText(dlg.FileName);
+            };
+
+            // Tag buttons — user selects text in sampleBox then clicks
+            var btnTagNumber  = MakeButton("🔢 Tag as NUMBER",  160, 28);
+            var btnTagMessage = MakeButton("💬 Tag as MESSAGE", 160, 28);
+            var tagHint       = MakeLabel("← Select text in box above, then tag it");
+            tagHint.ForeColor = Color.FromArgb(140, 140, 160);
+
+            string taggedNumber  = "";
+            string taggedMessage = "";
+            var tagNumLbl = MakeLabel("Number tag:  —");
+            var tagMsgLbl = MakeLabel("Message tag: —");
+            tagNumLbl.ForeColor = Color.FromArgb(120, 200, 255);
+            tagMsgLbl.ForeColor = Color.FromArgb(120, 200, 255);
+
+            btnTagNumber.Click += (_, _) =>
+            {
+                string sel = sampleBox.SelectedText;
+                if (string.IsNullOrWhiteSpace(sel)) { Log("[Format] Select text first."); return; }
+                taggedNumber  = sel;
+                tagNumLbl.Text = $"Number tag:  \"{sel}\"";
+                Log($"[Format] Tagged as NUMBER: {sel}");
+            };
+
+            btnTagMessage.Click += (_, _) =>
+            {
+                string sel = sampleBox.SelectedText;
+                if (string.IsNullOrWhiteSpace(sel)) { Log("[Format] Select text first."); return; }
+                taggedMessage = sel;
+                tagMsgLbl.Text = $"Message tag: \"{sel}\"";
+                Log($"[Format] Tagged as MESSAGE: {sel}");
+            };
+
+            var btnLearnFormat = MakeButton("✅ Learn This Format", 170, 30);
+            btnLearnFormat.BackColor = Color.FromArgb(40, 100, 50);
+            btnLearnFormat.Click += (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(sampleBox.Text))
+                { Log("[Format] Paste or upload sample first."); return; }
+                if (string.IsNullOrEmpty(taggedNumber))
+                { Log("[Format] Tag the NUMBER part first."); return; }
+                if (string.IsNullOrEmpty(taggedMessage))
+                { Log("[Format] Tag the MESSAGE part first."); return; }
+
+                _formatEngine.LearnFromSample(sampleBox.Text, taggedNumber, taggedMessage);
+                formatStatusLbl.Text      = $"✅ Format learned  (Number line:{_formatEngine.Config.NumberLineIndex}, Msg line:{_formatEngine.Config.MessageLineIndex})";
+                formatStatusLbl.ForeColor = Color.FromArgb(80, 220, 120);
+                Log("[Format] Format learned and saved!");
+                CheckAllCaptured(btnStartWatcher, statusLbl);
+            };
+
+            // ── Watcher start/stop ───────────────────────────────────────
+            btnStartWatcher.BackColor = Color.FromArgb(40, 100, 50);
+            btnStartWatcher.Enabled   = false;
+
+            btnStartWatcher.Click += (_, _) =>
+            {
+                if (_clipWatcher != null && _clipWatcher.IsRunning)
+                {
+                    _clipWatcher.Stop();
+                    btnStartWatcher.Text      = "▶ Start Clipboard Watcher";
+                    btnStartWatcher.BackColor = Color.FromArgb(40, 100, 50);
+                    statusLbl.Text            = "● Watcher: OFF";
+                    statusLbl.ForeColor       = Color.FromArgb(200, 80, 80);
+                }
+                else
+                {
+                    _clipWatcher = new ClipboardWatcher(_formatEngine, Log);
+                    _clipWatcher.OnTokenDetected += FireAutomation;
+                    _clipWatcher.Start();
+                    btnStartWatcher.Text      = "■ Stop Watcher";
+                    btnStartWatcher.BackColor = Color.FromArgb(120, 40, 40);
+                    statusLbl.Text            = "● Watcher: ON — Waiting for Telegram copy...";
+                    statusLbl.ForeColor       = Color.FromArgb(80, 220, 120);
+                }
             };
 
             // ── Layout ───────────────────────────────────────────────────
-            var grid = new TableLayoutPanel
+            var scroll = new Panel
             {
-                ColumnCount = 2,
-                AutoSize    = true,
-                Padding     = new Padding(4),
-                Margin      = new Padding(0, 8, 0, 8)
+                Dock        = DockStyle.Fill,
+                AutoScroll  = true
             };
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
-            void AddRow(Label lbl, Label val)
-            {
-                lbl.Margin = new Padding(0, 5, 8, 5);
-                val.Margin = new Padding(0, 5, 0, 5);
-                grid.Controls.Add(lbl);
-                grid.Controls.Add(val);
-            }
-
-            AddRow(fTitle,  lTitle);
-            AddRow(fClass,  lClass);
-            AddRow(fCtrl,   lCtrlId);
-            AddRow(fHandle, lHandle);
-            AddRow(fMouse,  lMouse);
-            AddRow(fClient, lClient);
-            AddRow(fWinPos, lWinPos);
-
-            // Pixel row with swatch inline
-            var pixelRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-            pixelRow.Controls.Add(lPixel);
-            pixelRow.Controls.Add(swatch);
-            fPixel.Margin = new Padding(0, 5, 8, 5);
-            grid.Controls.Add(fPixel);
-            grid.Controls.Add(pixelRow);
 
             var layout = new FlowLayoutPanel
             {
-                Dock          = DockStyle.Fill,
                 FlowDirection = FlowDirection.TopDown,
                 AutoSize      = true,
+                Width         = 700,
                 Padding       = new Padding(8),
                 WrapContents  = false
             };
 
+            // Section 1: Spy
+            layout.Controls.Add(MakeLabel("── Step 1: Drag crosshair onto each control ──"));
             layout.Controls.Add(MakeRow(finder, finderHint));
-            layout.Controls.Add(MakeRow(btnFreeze, btnCopyAll));
-            layout.Controls.Add(MakeSep());
-            layout.Controls.Add(grid);
 
-            p.Controls.Add(layout);
+            var spyGrid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true };
+            spyGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            spyGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            void SR(Label l, Label v) { l.Margin = new Padding(0,4,8,4); v.Margin = new Padding(0,4,0,4); spyGrid.Controls.Add(l); spyGrid.Controls.Add(v); }
+            SR(MakeLabel("Window Title:"), lTitle);
+            SR(MakeLabel("Class Name:"),   lClass);
+            SR(MakeLabel("Handle:"),       lHandle);
+            var pixRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pixRow.Controls.Add(lMouse); pixRow.Controls.Add(swatch);
+            SR(MakeLabel("Mouse (X,Y):"),  lMouse);
+            layout.Controls.Add(spyGrid);
+            layout.Controls.Add(MakeSep());
+
+            // Section 2: Capture slots
+            layout.Controls.Add(MakeLabel("── Step 2: Capture each target coordinate ──"));
+            layout.Controls.Add(MakeRow(btnCapPhone, slotPhone));
+            layout.Controls.Add(MakeRow(btnCapPlus,  slotPlus));
+            layout.Controls.Add(MakeRow(btnCapMsg,   slotMsg));
+            layout.Controls.Add(MakeRow(btnCapSend,  slotSend));
+            layout.Controls.Add(MakeSep());
+
+            // Section 3: Format
+            layout.Controls.Add(MakeLabel("── Step 3: Teach the token format ──"));
+            layout.Controls.Add(formatStatusLbl);
+            layout.Controls.Add(MakeRow(btnUploadSample, MakeLabel("or paste below:")));
+            layout.Controls.Add(sampleBox);
+            layout.Controls.Add(tagHint);
+            layout.Controls.Add(MakeRow(btnTagNumber, btnTagMessage));
+            layout.Controls.Add(MakeRow(tagNumLbl, tagMsgLbl));
+            layout.Controls.Add(btnLearnFormat);
+            layout.Controls.Add(MakeSep());
+
+            // Section 4: Watcher
+            layout.Controls.Add(MakeLabel("── Step 4: Start watcher — then copy from Telegram ──"));
+            layout.Controls.Add(MakeRow(btnStartWatcher, statusLbl));
+
+            scroll.Controls.Add(layout);
+            p.Controls.Add(scroll);
             return p;
+        }
+
+        private void CheckAllCaptured(Button btn, Label lbl)
+        {
+            bool coordsSet  = _capPhoneX != 0 && _capPlusX != 0 && _capMsgX != 0 && _capSendX != 0;
+            bool formatSet  = _formatEngine.Config.IsLearned;
+            btn.Enabled     = coordsSet && formatSet;
+            if (!btn.Enabled)
+                lbl.Text = coordsSet ? "⚠ Learn format first" : formatSet ? "⚠ Capture all 4 coords first" : "⚠ Capture coords + learn format";
+        }
+
+        private void FireAutomation(string number, string message)
+        {
+            // Run on background thread — UI stays responsive
+            Task.Run(() =>
+            {
+                try
+                {
+                    Log($"[Auto] Firing → {number}");
+                    Thread.Sleep(300);
+
+                    // Activate target window
+                    if (!string.IsNullOrEmpty(_capWinTitle))
+                        WindowEngine.Activate(_capWinTitle);
+                    Thread.Sleep(400);
+
+                    // 1. Click phone field
+                    MouseEngine.LeftClick(_capPhoneX, _capPhoneY);
+                    Thread.Sleep(300);
+
+                    // 2. Clear & paste number
+                    KeyboardEngine.HotKey("CTRL", "A");
+                    Thread.Sleep(100);
+                    Clipboard.SetText(number);
+                    Thread.Sleep(100);
+                    KeyboardEngine.HotKey("CTRL", "V");
+                    Thread.Sleep(400);
+
+                    // 3. Click + button
+                    MouseEngine.LeftClick(_capPlusX, _capPlusY);
+                    Thread.Sleep(500);
+
+                    // 4. Click message field
+                    MouseEngine.LeftClick(_capMsgX, _capMsgY);
+                    Thread.Sleep(300);
+
+                    // 5. Clear & paste message
+                    KeyboardEngine.HotKey("CTRL", "A");
+                    Thread.Sleep(100);
+                    Clipboard.SetText(message);
+                    Thread.Sleep(100);
+                    KeyboardEngine.HotKey("CTRL", "V");
+                    Thread.Sleep(400);
+
+                    // 6. Click Send
+                    MouseEngine.LeftClick(_capSendX, _capSendY);
+                    Thread.Sleep(300);
+
+                    Log($"[Auto] ✅ Done → {number}");
+                }
+                catch (Exception ex)
+                {
+                    Log($"[Auto] Error: {ex.Message}");
+                }
+            });
         }
 
         // ──────────────────────────────────────────────────────────────────
